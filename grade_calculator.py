@@ -3,7 +3,8 @@ Grade Calculator for METU NCC Transcript System
 Implements METU NCC Undergraduate Education Regulations - Article 24
 """
 
-from typing import Dict, List, Tuple, Optional
+import functools
+from typing import Dict, List, Tuple, Optional, Any # Add Any if not already there
 from dataclasses import dataclass
 
 
@@ -233,35 +234,50 @@ class GradeCalculator:
 
         return semester_grades
 
-    def calculate_semester_summary(self, semester_grades: Dict[str, List[CourseGrade]]) -> Dict[str, Dict]:
+    def calculate_semester_summary(self, semester_grades: Dict[str, List[CourseGrade]]) -> Dict[str, Dict[str, Any]]:
         """
-        Calculate summary statistics for each semester
+        Calculate summary statistics for each semester, ensuring chronological processing
+        for accurate running cumulative totals.
         """
-        summary = {}
+        summary_output: Dict[str, Dict[str, Any]] = {}
+        
+        # Sort semester keys chronologically using your existing _compare_semesters method
+        # This is crucial for calculating running totals correctly.
+        if not semester_grades:
+            return summary_output
+            
+        sorted_semester_keys = sorted(semester_grades.keys(), key=functools.cmp_to_key(self._compare_semesters))
 
-        for semester, grades in semester_grades.items():
-            semester_gpa, sem_points, sem_credits = self.calculate_semester_gpa(grades)
+        # This list will accumulate all CourseGrade objects chronologically
+        # to correctly calculate CGPA at the end of each semester.
+        all_grades_processed_chronologically: List[CourseGrade] = []
 
-            # Calculate cumulative values up to this semester
-            all_grades_up_to_semester = []
-            for sem in sorted(semester_grades.keys()):
-                all_grades_up_to_semester.extend(semester_grades[sem])
-                if sem == semester:
-                    break
+        for semester_key in sorted_semester_keys:
+            grades_this_semester = semester_grades.get(semester_key, []) # Get grades for the current semester
+            
+            # Calculate stats for the current semester
+            current_semester_gpa, current_semester_quality_points, current_semester_gpa_credits = \
+                self.calculate_semester_gpa(grades_this_semester)
 
-            cgpa, total_points, total_credits = self.calculate_cgpa(all_grades_up_to_semester)
+            # Add this semester's grades to our running list of all grades processed so far
+            all_grades_processed_chronologically.extend(grades_this_semester)
+            
+            # Calculate CGPA and cumulative points/credits based on *all* grades processed up to this point.
+            # self.calculate_cgpa returns: (CGPA, total_quality_points_for_cgpa, total_gpa_credits_for_cgpa)
+            # These are cumulative values considering only the latest attempts of courses.
+            cgpa_at_end_of_semester, cumulative_q_points, cumulative_gpa_credits_val = \
+                self.calculate_cgpa(all_grades_processed_chronologically)
 
-            summary[semester] = {
-                'semester_gpa': semester_gpa,
-                'semester_points': sem_points,
-                'semester_credits': sem_credits,
-                'cumulative_gpa': cgpa,
-                'cumulative_points': total_points,
-                'cumulative_credits': total_credits,
-                'courses': grades
+            summary_output[semester_key] = {
+                'semester_gpa': current_semester_gpa,
+                'semester_points': current_semester_quality_points,        # Quality points for this semester
+                'semester_credits': current_semester_gpa_credits,      # GPA Credits for this semester
+                'cumulative_gpa_at_semester_end': cgpa_at_end_of_semester,
+                'cumulative_quality_points_at_semester_end': cumulative_q_points, # CORRECTED: Use variable from calculate_cgpa
+                'cumulative_gpa_credits_at_semester_end': cumulative_gpa_credits_val,    # CORRECTED: Use variable from calculate_cgpa
+                'courses': grades_this_semester # List of CourseGrade objects for this semester
             }
-
-        return summary
+        return summary_output
 
     def get_academic_standing(self, cgpa: float) -> str:
         """

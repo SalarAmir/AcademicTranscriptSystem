@@ -1,7 +1,5 @@
 import sqlite3
-import csv
-import os
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 
 
 class TranscriptDatabase:
@@ -102,51 +100,96 @@ class TranscriptDatabase:
 
     def add_department(self, dept_id: str, dept_name: str) -> bool:
         """Add a new department"""
+        conn = None
         try:
             conn = self.get_connection()
             c = conn.cursor()
             c.execute("INSERT INTO departments (dept_id, dept_name) VALUES (?, ?)",
                       (dept_id, dept_name))
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
+        finally:
+            if conn:
+                conn.close()
 
     def add_curriculum_version(self, dept_id: str, version_number: int,
-                               version_name: str = None, effective_date: str = None) -> int:
+                              version_name: str = None, effective_date: str = None) -> int:
         """Add a new curriculum version and return its ID"""
-        conn = self.get_connection()
-        c = conn.cursor()
+        conn = None
+        try:
+            conn = self.get_connection()
+            c = conn.cursor()
+            
+            # First check if this combination already exists
+            c.execute("""SELECT curriculum_id FROM curriculum_versions 
+                         WHERE dept_id = ? AND version_number = ?""", 
+                     (dept_id, version_number))
+            existing = c.fetchone()
+            if existing:
+                return existing[0]  # Return existing ID instead of creating duplicate
+            
+            # Insert new curriculum version if it doesn't exist
+            if effective_date:
+                c.execute("""INSERT INTO curriculum_versions 
+                            (dept_id, version_number, version_name, effective_date) 
+                            VALUES (?, ?, ?, ?)""",
+                        (dept_id, version_number, version_name, effective_date))
+            else:
+                c.execute("""INSERT INTO curriculum_versions 
+                            (dept_id, version_number, version_name) 
+                            VALUES (?, ?, ?)""",
+                        (dept_id, version_number, version_name))
 
-        if effective_date:
-            c.execute("""INSERT INTO curriculum_versions 
-                        (dept_id, version_number, version_name, effective_date) 
-                        VALUES (?, ?, ?, ?)""",
-                      (dept_id, version_number, version_name, effective_date))
-        else:
-            c.execute("""INSERT INTO curriculum_versions 
-                        (dept_id, version_number, version_name) 
-                        VALUES (?, ?, ?)""",
-                      (dept_id, version_number, version_name))
-
-        curriculum_id = c.lastrowid
-        conn.commit()
-        conn.close()
-        return curriculum_id
-
+            curriculum_id = c.lastrowid
+            conn.commit()
+            return curriculum_id
+        except sqlite3.Error as e:
+            print(f"Database error in add_curriculum_version: {e}")
+            return -1
+        finally:
+            if conn:
+                conn.close()
+    
     def add_course_name(self, course_code: str, course_name: str, dept_id: str = None):
         """Add a course name to the database"""
+        conn = None
         try:
             conn = self.get_connection()
             c = conn.cursor()
             c.execute("INSERT INTO course_names (course_code, course_name, dept_id) VALUES (?, ?, ?)",
                       (course_code, course_name, dept_id))
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
+        finally:
+            if conn:
+                conn.close()
+    
+    def add_curriculum_course(self, curriculum_id: int, course_code: str, 
+                             metu_credits: str, ects_credits: float, 
+                             is_required: bool = True, semester_suggested: int = 1):
+        """Adds a course with its details to a specific curriculum version."""
+        try:
+            conn = self.get_connection()
+            c = conn.cursor()
+            c.execute("""INSERT OR IGNORE INTO curriculum_courses
+                     (curriculum_id, course_code, metu_credits, ects_credits, is_required, semester_suggested)
+                     VALUES (?, ?, ?, ?, ?, ?)""",
+                  (curriculum_id, course_code, metu_credits, ects_credits, is_required, semester_suggested))
+            conn.commit()
+            # print(f"Added course {course_code} to curriculum {curriculum_id}")
+            return True
+        except sqlite3.IntegrityError:
+            # This can happen if the course_code + curriculum_id PK already exists
+            # print(f"Warning: Course {course_code} likely already in curriculum {curriculum_id} or other integrity error.")
+            return False
+        finally:
+            if conn:
+                conn.close()
+
 
     def parse_curriculum_csv(self, csv_file_path: str, curriculum_id: int):
         """Parse curriculum CSV file and add courses to the curriculum"""
@@ -226,6 +269,7 @@ class TranscriptDatabase:
     def add_student(self, student_id: str, first_name: str, last_name: str,
                     dept_id: str, curriculum_id: int, enrollment_year: int = None) -> bool:
         """Add a new student"""
+        conn = None
         try:
             conn = self.get_connection()
             c = conn.cursor()
@@ -234,14 +278,17 @@ class TranscriptDatabase:
                         VALUES (?, ?, ?, ?, ?, ?)""",
                       (student_id, first_name, last_name, dept_id, curriculum_id, enrollment_year))
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
+        finally:
+            if conn:
+                conn.close()
 
     def add_enrollment(self, student_id: str, course_code: str, semester: str,
                        grade: str, attempt_number: int = 1) -> bool:
         """Add a student enrollment/grade"""
+        conn = None
         try:
             conn = self.get_connection()
             c = conn.cursor()
@@ -250,10 +297,12 @@ class TranscriptDatabase:
                         VALUES (?, ?, ?, ?, ?)""",
                       (student_id, course_code, semester, grade, attempt_number))
             conn.commit()
-            conn.close()
             return True
         except sqlite3.IntegrityError:
             return False
+        finally:
+            if conn:
+                conn.close()
 
     def get_student_info(self, student_id: str) -> Optional[Dict[str, Any]]:
         """Get student information"""
@@ -405,6 +454,7 @@ class TranscriptDatabase:
         print(f"Added {student_counter - 1} students with sample enrollments")
         print("Sample data population completed!")
 
+    
 
 if __name__ == "__main__":
     # Initialize database
@@ -430,3 +480,4 @@ if __name__ == "__main__":
             print("First few enrollments:")
             for enrollment in enrollments[:3]:
                 print(f"  {enrollment}")
+

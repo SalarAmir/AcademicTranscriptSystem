@@ -4,11 +4,17 @@ Generates professional PDF and HTML transcripts
 """
 
 import os
-from typing import List, Optional
-from transcript_generator import TranscriptGenerator, TranscriptData
+from typing import List, Optional, Dict, Any # Added Dict for consistency and Any for type annotations
+from transcript_generator import TranscriptData # Corrected import, only TranscriptData is used
 from datetime import datetime
-import webbrowser
+# import webbrowser # webbrowser was not used
 
+# ReportLab imports
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
 
 
 class TranscriptFormatter:
@@ -45,6 +51,7 @@ class TranscriptFormatter:
         """
         Create the HTML content for a transcript
         """
+        # Using the HTML structure you provided in the last file upload
         html = f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -239,7 +246,7 @@ class TranscriptFormatter:
             </div>
             <div>
                 <div class="info-item">
-                    <span class="info-label">Curriculum:</span> {transcript_data.curriculum_version}
+                    <span class="info-label">Curriculum:</span> {transcript_data.curriculum_version} ({transcript_data.curriculum_name or ''})
                 </div>
                 <div class="info-item">
                     <span class="info-label">Academic Standing:</span> {transcript_data.academic_standing}
@@ -257,13 +264,13 @@ class TranscriptFormatter:
                     <span class="info-label">Cumulative GPA:</span> <span class="summary-value">{transcript_data.overall_cgpa:.2f}</span>
                 </div>
                 <div class="info-item">
-                    <span class="info-label">Credits Completed:</span> <span class="summary-value">{transcript_data.total_credits_completed:.1f}</span>
+                    <span class="info-label">Credits Completed (GPA):</span> <span class="summary-value">{transcript_data.total_credits_completed:.1f}</span>
                 </div>
                 <div class="info-item">
-                    <span class="info-label">Credits Passed:</span> <span class="summary-value">{transcript_data.total_credits_passed:.1f}</span>
+                    <span class="info-label">Credits Passed (GPA):</span> <span class="summary-value">{transcript_data.total_credits_passed:.1f}</span>
                 </div>
                 <div class="info-item">
-                    <span class="info-label">Completion Rate:</span> <span class="summary-value">{(transcript_data.total_credits_passed / 120 * 100):.1f}%</span>
+                    <span class="info-label">Completion Rate:</span> <span class="summary-value">{(transcript_data.total_credits_passed / 120.0 * 100.0) if 120.0 > 0 else 0.0:.1f}%</span>
                 </div>
             </div>
         </div>
@@ -291,6 +298,8 @@ class TranscriptFormatter:
     def _generate_semester_sections(self, transcript_data: TranscriptData) -> str:
         """Generate HTML for all semester sections"""
         sections_html = ""
+        if not transcript_data.semester_summaries:
+            return "<p>No semester data found.</p>"
 
         for semester in sorted(transcript_data.semester_summaries.keys()):
             summary = transcript_data.semester_summaries[semester]
@@ -301,19 +310,19 @@ class TranscriptFormatter:
                 <div class="semester-summary">
                     <div class="summary-item">
                         <div>Semester GPA</div>
-                        <div class="summary-value">{summary['semester_gpa']:.2f}</div>
+                        <div class="summary-value">{summary.get('semester_gpa', 0.0):.2f}</div>
                     </div>
                     <div class="summary-item">
                         <div>Cumulative GPA</div>
-                        <div class="summary-value">{summary['cumulative_gpa']:.2f}</div>
+                        <div class="summary-value">{summary.get('cumulative_gpa', 0.0):.2f}</div>
                     </div>
                     <div class="summary-item">
                         <div>Semester Credits</div>
-                        <div class="summary-value">{summary['semester_credits']:.1f}</div>
+                        <div class="summary-value">{summary.get('semester_credits', 0.0):.1f}</div>
                     </div>
                     <div class="summary-item">
-                        <div>Total Credits</div>
-                        <div class="summary-value">{summary['cumulative_credits']:.1f}</div>
+                        <div>Total Credits</div> <!-- This is cumulative_credits for that semester -->
+                        <div class="summary-value">{summary.get('cumulative_credits', 0.0):.1f}</div>
                     </div>
                 </div>
 
@@ -328,180 +337,166 @@ class TranscriptFormatter:
                         </tr>
                     </thead>
                     <tbody>
-                        {self._generate_course_rows(summary['courses'])}
+                        {self._generate_course_rows(summary.get('courses', []))}
                     </tbody>
                 </table>
             </div>
             """
-
         return sections_html
 
-    def _generate_course_rows(self, courses: List) -> str:
+    def _generate_course_rows(self, courses: List) -> str: # courses is List[CourseGrade]
         """Generate HTML table rows for courses"""
         rows_html = ""
+        if not courses:
+            return "<tr><td colspan='5'>No courses recorded for this semester.</td></tr>"
 
-        for course in courses:
+        for course in courses: # Each course is a CourseGrade object
             grade_class = self._get_grade_css_class(course.grade)
+            # Ensure all attributes exist, falling back to "N/A" or 0.0 if necessary
+            course_code = getattr(course, 'course_code', 'N/A')
+            course_name = getattr(course, 'course_name', 'N/A')
+            credit_hours = getattr(course, 'credit_hours', 0.0)
+            grade = getattr(course, 'grade', 'N/A')
+            grade_points = getattr(course, 'grade_points', 0.0)
+
             rows_html += f"""
                 <tr>
-                    <td>{course.course_code}</td>
-                    <td>{course.course_name}</td>
-                    <td>{course.credit_hours:.1f}</td>
-                    <td><span class="{grade_class}">{course.grade}</span></td>
-                    <td>{course.grade_points:.2f}</td>
+                    <td>{course_code}</td>
+                    <td>{course_name}</td>
+                    <td>{credit_hours:.1f}</td>
+                    <td><span class="{grade_class}">{grade}</span></td>
+                    <td>{grade_points:.2f}</td>
                 </tr>
             """
-
         return rows_html
 
     def _get_grade_css_class(self, grade: str) -> str:
         """Get CSS class for grade styling"""
-        if grade in ['AA', 'BA']:
+        grade_upper = grade.upper() if grade else ""
+        if grade_upper in ['AA', 'BA']:
             return 'grade-excellent'
-        elif grade in ['BB', 'CB']:
+        elif grade_upper in ['BB', 'CB']:
             return 'grade-good'
-        elif grade in ['CC', 'DC', 'DD']:
+        elif grade_upper in ['CC', 'DC', 'DD']:
             return 'grade-average'
-        elif grade in ['FF', 'FD']:
+        elif grade_upper in ['FF', 'FD', 'NA']: # 'NA' might also be a failing grade
             return 'grade-poor'
-        elif grade in ['EX', 'P']:
+        elif grade_upper in ['EX', 'P']:
             return 'grade-exempt'
-        else:
-            return ''
+        # For other grades like W, I, U, no specific class or a default one
+        return ''
 
     def generate_pdf_transcript(self, transcript_data: TranscriptData) -> Optional[str]:
         """
         Generate PDF transcript (requires reportlab library)
         """
         try:
-            from reportlab.lib.pagesizes import letter, A4
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.lib.units import inch
-            from reportlab.lib import colors
-
             filename = f"{transcript_data.student_id}_transcript.pdf"
             filepath = os.path.join(self.output_dir, filename)
 
-            # Create PDF document
             doc = SimpleDocTemplate(filepath, pagesize=A4,
-                                    rightMargin=72, leftMargin=72,
-                                    topMargin=72, bottomMargin=18)
-
-            # Build story (content)
-            story = []
+                                    rightMargin=0.75*inch, leftMargin=0.75*inch,
+                                    topMargin=0.75*inch, bottomMargin=0.75*inch)
+            story: List[Any] = [] # Ensure story is typed for clarity
             styles = getSampleStyleSheet()
 
-            # Custom styles
-            title_style = ParagraphStyle(
-                'CustomTitle',
-                parent=styles['Heading1'],
-                fontSize=16,
-                spaceAfter=30,
-                alignment=1,  # Center
-                textColor=colors.HexColor('#003366')
-            )
+            # Define styles
+            style_title = ParagraphStyle('Title', parent=styles['h1'], fontSize=14, alignment=1, spaceAfter=8, textColor=colors.HexColor('#003366'), leading=16)
+            style_doc_title = ParagraphStyle('DocTitle', parent=style_title, fontSize=12, spaceAfter=16)
+            style_heading = ParagraphStyle('Heading', parent=styles['h2'], fontSize=12, spaceAfter=6, textColor=colors.HexColor('#003366'), leading=14)
+            style_semester_title = ParagraphStyle('SemesterTitle', parent=styles['h3'], fontSize=11, spaceBefore=10, spaceAfter=4, textColor=colors.HexColor('#003366'), leading=13)
+            style_body = ParagraphStyle('Body', parent=styles['Normal'], fontSize=9, leading=11)
+            style_table_header = ParagraphStyle('TableHeader', parent=style_body, fontName='Helvetica-Bold')
+            style_footer = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, alignment=1, textColor=colors.grey, leading=10)
 
-            heading_style = ParagraphStyle(
-                'CustomHeading',
-                parent=styles['Heading2'],
-                fontSize=14,
-                spaceAfter=12,
-                textColor=colors.HexColor('#003366')
-            )
+            # 1. Transcript Header
+            story.append(Paragraph("MIDDLE EAST TECHNICAL UNIVERSITY", style_title))
+            story.append(Paragraph("NORTHERN CYPRUS CAMPUS", style_title))
+            story.append(Paragraph(transcript_data.transcript_type.upper(), style_doc_title))
+            story.append(Spacer(1, 0.20 * inch))
 
-            # Header
-            story.append(Paragraph("MIDDLE EAST TECHNICAL UNIVERSITY", title_style))
-            story.append(Paragraph("NORTHERN CYPRUS CAMPUS", title_style))
-            story.append(Paragraph("OFFICIAL ACADEMIC TRANSCRIPT", title_style))
-            story.append(Spacer(1, 20))
-
-            # Student Information
-            student_info = [
-                ['Student ID:', transcript_data.student_id, 'Full Name:', transcript_data.full_name],
-                ['Department:', transcript_data.department_name, 'Curriculum:', transcript_data.curriculum_version],
-                ['CGPA:', f"{transcript_data.overall_cgpa:.2f}", 'Academic Standing:',
-                 transcript_data.academic_standing],
-                ['Credits Completed:', f"{transcript_data.total_credits_completed:.1f}", 'Credits Passed:',
-                 f"{transcript_data.total_credits_passed:.1f}"]
+            # 2. Student Information Table
+            student_info_data = [
+                [Paragraph('<b>Student ID:</b>', style_body), Paragraph(transcript_data.student_id or 'N/A', style_body),
+                 Paragraph('<b>Full Name:</b>', style_body), Paragraph(transcript_data.full_name or 'N/A', style_body)],
+                [Paragraph('<b>Department:</b>', style_body), Paragraph(transcript_data.department_name or 'N/A', style_body),
+                 Paragraph('<b>Curriculum:</b>', style_body), Paragraph(f"{transcript_data.curriculum_version or 'N/A'} ({transcript_data.curriculum_name or ''})", style_body)],
+                [Paragraph('<b>Overall CGPA:</b>', style_body), Paragraph(f"{transcript_data.overall_cgpa:.2f}" if transcript_data.overall_cgpa is not None else "N/A", style_body),
+                 Paragraph('<b>Academic Standing:</b>', style_body), Paragraph(transcript_data.academic_standing or 'N/A', style_body)],
+                [Paragraph('<b>Total Credits Passed (GPA):</b>', style_body), Paragraph(f"{transcript_data.total_credits_passed:.1f}" if transcript_data.total_credits_passed is not None else "N/A", style_body),
+                 Paragraph('<b>Date Generated:</b>', style_body), Paragraph(transcript_data.generation_date or 'N/A', style_body)],
             ]
-
-            info_table = Table(student_info, colWidths=[1.2 * inch, 1.8 * inch, 1.2 * inch, 1.8 * inch])
-            info_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#f9f9f9')),
-                ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#003366')),
-                ('TEXTCOLOR', (2, 0), (2, -1), colors.HexColor('#003366')),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 10),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+            student_info_table = Table(student_info_data, colWidths=[1.4*inch, 2.1*inch, 1.4*inch, 2.1*inch])
+            student_info_table.setStyle(TableStyle([
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('LEFTPADDING', (0,0), (-1,-1), 4),
+                ('RIGHTPADDING', (0,0), (-1,-1), 4),
+                ('TOPPADDING', (0,0), (-1,-1), 3),
+                ('BOTTOMPADDING', (0,0), (-1,-1), 3),
             ]))
+            story.append(student_info_table)
+            story.append(Spacer(1, 0.20 * inch))
 
-            story.append(info_table)
-            story.append(Spacer(1, 20))
+            # 3. Academic Record Section
+            story.append(Paragraph("Academic Record", style_heading))
 
-            # Academic Record
-            story.append(Paragraph("Academic Record", heading_style))
+            sorted_semesters = sorted(transcript_data.semester_summaries.keys()) if transcript_data.semester_summaries else []
+            
+            if not sorted_semesters:
+                story.append(Paragraph("No academic records found for this student.", style_body))
 
-            # Semester by semester
-            for semester in sorted(transcript_data.semester_summaries.keys()):
-                summary = transcript_data.semester_summaries[semester]
-
-                # Semester header
-                story.append(Paragraph(f"<b>{semester}</b>", styles['Heading3']))
-
-                # Course table
-                course_data = [['Course Code', 'Course Title', 'Credits', 'Grade', 'Points']]
-
-                for course in summary['courses']:
-                    course_data.append
-
-                # ... (previous code in generate_pdf_transcript) ...
-
-            # Semester by semester
-            for semester in sorted(transcript_data.semester_summaries.keys()):
-                summary = transcript_data.semester_summaries[semester]
-
-                # Semester header
-                story.append(Paragraph(f"<b>{semester}</b>", styles['Heading3']))
-                story.append(Spacer(1, 6)) # Add a small spacer
-
-                # Course table header
-                course_data = [['Course Code', 'Course Title', 'Credits', 'Grade', 'Points']]
+            for semester in sorted_semesters:
+                summary = transcript_data.semester_summaries.get(semester, {}) # Default to empty dict
                 
-                # Populate course data for the current semester
-                for course in summary['courses']:
-                    course_data.append([
-                        course.course_code,
-                        Paragraph(course.course_name, styles['Normal']), # Wrap long names
-                        f"{course.credit_hours:.1f}",
-                        course.grade,
-                        f"{course.grade_points:.2f}"
-                    ])
+                story.append(Paragraph(semester, style_semester_title))
                 
-                # Create and style the course table
-                semester_table = Table(course_data, colWidths=[0.8*inch, 2.5*inch, 0.6*inch, 0.5*inch, 0.6*inch])
-                semester_table.setStyle(TableStyle([
-                    ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#003366')),
-                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                    ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                    ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f9f9f9')),
-                    ('GRID', (0, 0), (-1, -1), 1, colors.black),
-                    ('FONTSIZE', (0,0), (-1,-1), 8), # Smaller font for table content
+                sem_gpa = summary.get('semester_gpa', 0.0)
+                sem_credits = summary.get('semester_credits', 0.0)
+                sem_points = summary.get('semester_points', 0.0) # Assuming this is in summary
+                cum_gpa = summary.get('cumulative_gpa', 0.0)
+
+                sem_summary_line = f"GPA: {sem_gpa:.2f} | Credits: {sem_credits:.1f} | Points: {sem_points:.1f} | CGPA (End of Sem): {cum_gpa:.2f}"
+                story.append(Paragraph(sem_summary_line, style_body))
+                story.append(Spacer(1, 0.05 * inch))
+
+                course_header = [
+                    Paragraph('Code', style_table_header), Paragraph('Course Title', style_table_header),
+                    Paragraph('CR', style_table_header), Paragraph('Grade', style_table_header),
+                    Paragraph('Points', style_table_header) # Course quality points
+                ]
+                course_data_rows = [course_header]
+
+                semester_courses = summary.get('courses', []) # List[CourseGrade]
+                if not semester_courses:
+                    course_data_rows.append([Paragraph("No courses recorded for this semester.", style_body), "", "", "", ""])
+                else:
+                    for course in semester_courses: # course is expected to be CourseGrade object
+                        course_data_rows.append([
+                            Paragraph(getattr(course, 'course_code', 'N/A'), style_body),
+                            Paragraph(getattr(course, 'course_name', 'N/A'), style_body),
+                            Paragraph(f"{getattr(course, 'credit_hours', 0.0):.1f}", style_body),
+                            Paragraph(getattr(course, 'grade', 'N/A'), style_body),
+                            Paragraph(f"{getattr(course, 'grade_points', 0.0):.2f}", style_body)
+                        ])
+                
+                courses_table = Table(course_data_rows, colWidths=[0.7*inch, 3.0*inch, 0.5*inch, 0.6*inch, 0.7*inch])
+                courses_table.setStyle(TableStyle([
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey), # Header row background
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                    ('LEFTPADDING', (0,0), (-1,-1), 3),
+                    ('RIGHTPADDING', (0,0), (-1,-1), 3),
+                    ('TOPPADDING', (0,0), (-1,-1), 2),
+                    ('BOTTOMPADDING', (0,0), (-1,-1), 2),
                 ]))
-                story.append(semester_table)
-                story.append(Spacer(1, 12)) # Spacer after each semester table
+                story.append(courses_table)
+                story.append(Spacer(1, 0.15 * inch))
 
-            # Footer for PDF (optional, can be added similarly or using page templates)
-            story.append(Spacer(1, 24))
-            story.append(Paragraph(f"Transcript generated on: {transcript_data.generation_date}", styles['Normal']))
-            story.append(Paragraph("MIDDLE EAST TECHNICAL UNIVERSITY - NORTHERN CYPRUS CAMPUS", styles['Normal']))
-
+            # 4. Transcript Footer
+            story.append(Spacer(1, 0.3 * inch))
+            footer_line = Paragraph(f"End of Transcript. Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}. METU NCC.", style_footer)
+            story.append(footer_line)
 
             doc.build(story)
             return filepath
@@ -511,7 +506,8 @@ class TranscriptFormatter:
             print("Please install it: pip install reportlab")
             return None
         except Exception as e:
-            print(f"An error occurred during PDF generation for {transcript_data.student_id}: {e}")
+            import traceback # Ensure traceback is imported here if not globally
+            student_id_for_error = transcript_data.student_id if transcript_data and hasattr(transcript_data, 'student_id') else 'Unknown'
+            print(f"An error occurred during PDF generation for student {student_id_for_error}: {e}")
+            traceback.print_exc()
             return None
-        
-        
