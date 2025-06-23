@@ -3,7 +3,8 @@ import os
 from typing import List, Tuple, Optional, Dict, Any
 import random
 # NEW: Import the curriculum data from the separate file
-from curriculum_data import SNG_CURRICULA_DATA
+from curriculum_data import SNG_CURRICULA_DATA, EEE_CURRICULA_DATA, CNG_CURRICULA_DATA
+from grade_calculator import GradeCalculator
 
 class TranscriptDatabase:
     """
@@ -269,48 +270,163 @@ class TranscriptDatabase:
         except sqlite3.Error as e: print(f"Database error in get_all_students: {e}"); return []
         finally:
             if conn: conn.close()
+            
+    def get_course_prerequisites(self, curriculum_id: int, course_code: str) -> List[str]:
+        """Retrieves a list of prerequisite course codes for a given course."""
+        conn = None
+        try:
+            conn = self.get_connection()
+            c = conn.cursor()
+            c.execute("SELECT prerequisite_code FROM prerequisites WHERE curriculum_id = ? AND course_code = ?", (curriculum_id, course_code))
+            rows = c.fetchall()
+            return [row[0] for row in rows]
+        except sqlite3.Error as e:
+            print(f"Database error in get_course_prerequisites: {e}")
+            return []
+        finally:
+            if conn:
+                conn.close()
+
+    def get_student_passed_courses(self, student_id: str) -> List[str]:
+        """Retrieves a list of course codes for courses a student has passed."""
+        enrollments = self.get_student_enrollments(student_id)
+        if not enrollments:
+            return []
+
+        grade_calculator = GradeCalculator()
+        passed_courses = []
+        for enrollment in enrollments:
+            if grade_calculator.is_passing_grade(enrollment['grade']):
+                passed_courses.append(enrollment['course_code'])
+        return passed_courses
+
+    def add_enrollment_with_prereq_check(self, student_id: str, course_code: str, semester: str) -> Tuple[bool, str]:
+        """
+        Enrolls a student in a course after checking prerequisites.
+        Returns a tuple of (success_boolean, message_string).
+        """
+        student_info = self.get_student_info(student_id)
+        if not student_info:
+            return False, f"Student {student_id} not found."
+
+        curriculum_id = student_info['curriculum_id']
+        prerequisites = self.get_course_prerequisites(curriculum_id, course_code)
+        
+        if not prerequisites:
+            # No prerequisites, so enrollment is allowed
+            self.add_enrollment(student_id, course_code, semester, 'NA') # Enroll with a neutral grade initially
+            return True, f"Successfully enrolled {student_id} in {course_code} (no prerequisites)."
+
+        passed_courses = self.get_student_passed_courses(student_id)
+        
+        missing_prereqs = [prereq for prereq in prerequisites if prereq not in passed_courses]
+
+        if not missing_prereqs:
+            self.add_enrollment(student_id, course_code, semester, 'NA')
+            return True, f"Successfully enrolled {student_id} in {course_code}."
+        else:
+            return False, f"Failed to enroll {student_id} in {course_code}. Missing prerequisites: {', '.join(missing_prereqs)}"
+
 
     def populate_sample_data(self):
         """
-        Populates the database using the embedded SNG curriculum data.
+        Populates the database using all three curriculum datasets.
         """
         print("--- Starting Sample Data Population ---")
-        
+
         # 1. Add Departments
-        departments_data = [("SNG", "Software Engineering"), ("CSE", "Computer Science & Engineering"), ("EEE", "Electrical & Electronics Engineering")]
+        departments_data = [
+            ("CNG", "Computer Engineering"),
+            ("EEE", "Electrical & Electronics Engineering"),
+            ("SNG", "Software Engineering"),
+            ("MAT", "Mathematics"),
+            ("GER", "German Language"),
+            ("ME", "Mechanical Engineering"),
+            ("ENG", "English"),
+            ("HST", "History"),
+        ]
         print("1. Adding departments...")
         for dept_id, dept_name in departments_data:
             self.add_department(dept_id, dept_name)
         print("   Departments processed.")
 
-        # 2. Populate SNG Curricula from the imported data
-        sng_curriculum_ids = []
-        print("\n2. Populating SNG curriculum from embedded data...")
-        # The SNG_CURRICULA_DATA dictionary is now imported from curriculum_data.py
-        for version_num, courses in SNG_CURRICULA_DATA.items():
-            print(f"  Processing version {version_num}...")
-            version_name = f"SNG Curriculum v{version_num} (Embedded)"
-            curriculum_id = self.add_curriculum_version("SNG", version_num, version_name)
-            
-            if curriculum_id:
-                courses_added_count = 0
-                for course_data in courses:
-                    self.add_course_name(course_data['code'], course_data['name'], "SNG")
-                    if self.add_course_to_curriculum(curriculum_id, course_data['code'], course_data['metu'], course_data['ects'], semester_suggested=course_data['sem']):
-                        courses_added_count += 1
-                print(f"    -> Added {courses_added_count} courses to curriculum ID {curriculum_id}.")
-                sng_curriculum_ids.append(curriculum_id)
-            else:
-                print(f"  Failed to create curriculum version {version_num}.")
+        curricula_datasets = {
+            "CNG": CNG_CURRICULA_DATA,
+            "EEE": EEE_CURRICULA_DATA,
+            "SNG": SNG_CURRICULA_DATA
+        }
         
-        # 3. Add Students and Enrollments
-        print("\n3. Adding students and their enrollments...")
+        # 2. Pre-populate all course names to satisfy foreign key constraints
+        print("\n2. Pre-populating all course names...")
+        all_courses = set()
+        
+        # Add external prerequisites first
+        external_prereqs = [
+            {'code': '3570100', 'name': 'Pre-Calculus', 'dept_id': 'MAT'},
+            {'code': '3660271', 'name': 'German Language and Culture I', 'dept_id': 'GER'},
+            {'code': '3660272', 'name': 'German Language and Culture II', 'dept_id': 'GER'},
+            {'code': '6040201', 'name': 'Advanced German I', 'dept_id': 'GER'},
+            {'code': '6040202', 'name': 'Advanced German II', 'dept_id': 'GER'},
+            {'code': '2360119', 'name': 'Calculus for Technical Programs', 'dept_id': 'MAT'},
+            {'code': '2360117', 'name': 'Applied Calculus', 'dept_id': 'MAT'},
+            {'code': '6390101', 'name': 'English for Academic Purposes I', 'dept_id': 'ENG'},
+            {'code': '2402201', 'name': 'History of the Turkish Republic I', 'dept_id': 'HST'},
+        ]
+        for course_data in external_prereqs:
+            all_courses.add((course_data['code'], course_data['name'], course_data['dept_id']))
+
+        # Add courses from main curricula
+        for dept_id, curriculum_data in curricula_datasets.items():
+            for version_num, courses in curriculum_data.items():
+                for course_data in courses:
+                    all_courses.add((course_data['code'], course_data['name'], dept_id))
+        
+        for course_code, course_name, dept_id in all_courses:
+            self.add_course_name(course_code, course_name, dept_id)
+        print("   All unique course names have been added.")
+
+
+        # 3. Populate curricula and prerequisites
+        all_curriculum_ids = {"CNG": [], "EEE": [], "SNG": []}
+        print("\n3. Populating curricula and prerequisites...")
+        for dept_id, curriculum_data in curricula_datasets.items():
+            print(f"  Processing {dept_id} curricula...")
+            for version_num, courses in curriculum_data.items():
+                print(f"    Processing version {version_num}...")
+                version_name = f"{dept_id} Curriculum v{version_num} (Embedded)"
+                curriculum_id = self.add_curriculum_version(dept_id, version_num, version_name)
+
+                if curriculum_id:
+                    courses_added_count = 0
+                    for course_data in courses:
+                        if self.add_course_to_curriculum(
+                                curriculum_id,
+                                course_data['code'],
+                                course_data['metu'],
+                                course_data['ects'],
+                                semester_suggested=course_data['sem']
+                        ):
+                            courses_added_count += 1
+                        if course_data.get('prerequisites'):
+                            for prereq_code in course_data['prerequisites']:
+                                self.add_prerequisite(curriculum_id, course_data['code'], prereq_code)
+
+                    print(f"      -> Added {courses_added_count} courses to curriculum ID {curriculum_id}.")
+                    all_curriculum_ids[dept_id].append(curriculum_id)
+                else:
+                    print(f"    Failed to create curriculum version {version_num} for {dept_id}.")
+        
+        # 4. Add Students and Enrollments
+        print("\n4. Adding students and their enrollments...")
         student_counter = 1
         grades = ["AA", "BA", "BB", "CB", "CC", "DC", "DD", "FF", "EX", "P", "NA"]
+        zero_credit_grades = ["S", "U"]
         first_names = ["Ali", "Ayşe", "Mehmet", "Zeynep", "Can", "Elif", "Cem", "Deniz", "Emir", "Selin"]
         last_names = ["Yilmaz", "Kaya", "Demir", "Şahin", "Çelik", "Yildiz", "Özdemir", "Arslan", "Koç", "Aydin"]
+        
+        grade_calculator = GradeCalculator()
 
-        for dept_id_loop, dept_name_loop in departments_data:
+        for dept_id_loop, dept_name_loop in [("CNG", "Computer Engineering"), ("EEE", "Electrical & Electronics Engineering"), ("SNG", "Software Engineering")]:
             print(f"  Populating 25 students for department: {dept_name_loop}")
             for _ in range(25):
                 student_id = f"26{str(student_counter).zfill(5)}"
@@ -320,8 +436,8 @@ class TranscriptDatabase:
                 
                 assigned_curriculum_id = None
                 
-                if dept_id_loop == "SNG" and sng_curriculum_ids:
-                    assigned_curriculum_id = random.choice(sng_curriculum_ids)
+                if all_curriculum_ids[dept_id_loop]:
+                    assigned_curriculum_id = random.choice(all_curriculum_ids[dept_id_loop])
                 else:
                     assigned_curriculum_id = self.add_curriculum_version(dept_id_loop, 1, f"{dept_name_loop} Placeholder Curriculum")
                 
@@ -332,15 +448,15 @@ class TranscriptDatabase:
                 if self.add_student(student_id, first_name, last_name, dept_id_loop, assigned_curriculum_id, enrollment_year):
                     conn_temp = self.get_connection()
                     c_temp = conn_temp.cursor()
-                    # UPDATED QUERY: Fetch course_code and semester_suggested
-                    c_temp.execute("SELECT course_code, semester_suggested FROM curriculum_courses WHERE curriculum_id = ?", 
+                    # UPDATED QUERY: Fetch course_code, semester_suggested and metu_credits
+                    c_temp.execute("SELECT course_code, semester_suggested, metu_credits FROM curriculum_courses WHERE curriculum_id = ?", 
                                    (assigned_curriculum_id,))
-                    courses_in_curriculum = c_temp.fetchall() # List of (course_code, semester_suggested) tuples
+                    courses_in_curriculum = c_temp.fetchall() # List of (course_code, semester_suggested, metu_credits) tuples
                     conn_temp.close()
 
                     if courses_in_curriculum:
                         # NEW LOGIC: Enroll student in all courses according to their suggested semester
-                        for course_code, semester_num in courses_in_curriculum:
+                        for course_code, semester_num, metu_credits in courses_in_curriculum:
                             # --- LOGIC TO MAP SEMESTER NUMBER TO ACADEMIC YEAR AND SEASON ---
                             year_offset = (semester_num - 1) // 2
                             is_spring = (semester_num % 2 == 0)
@@ -351,7 +467,14 @@ class TranscriptDatabase:
                             semester_to_enroll = f"{enrollment_semester_year}-{enrollment_season}"
                             # --- END OF SEMESTER MAPPING LOGIC ---
                             
-                            self.add_enrollment(student_id, course_code, semester_to_enroll, random.choice(grades))
+                            credit_hours = grade_calculator.extract_credit_hours(metu_credits)
+
+                            if credit_hours == 0.0:
+                                chosen_grade = random.choice(zero_credit_grades)
+                            else:
+                                chosen_grade = random.choice(grades)
+
+                            self.add_enrollment(student_id, course_code, semester_to_enroll, chosen_grade)
                 
                 student_counter += 1
         
@@ -394,3 +517,27 @@ if __name__ == "__main__":
                 print(f"Could not retrieve info for student: {student_id_to_test}")
     else:
         print("No students found in the database to test queries.")
+        
+    print("\n=== Prerequisite Check Demonstration ===")
+    test_student_id = "2600001"
+    course_to_test = "3570120"  # Calculus for Functions of Several Variables
+    prereq_for_course = "3570119" # Calculus with Analytic Geometry
+
+    print(f"\nAttempting to enroll student {test_student_id} in {course_to_test} without prerequisite...")
+    # First, let's remove any existing passing grades for the prerequisite to ensure the check fails
+    conn = db.get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM student_enrollments WHERE student_id = ? AND course_code = ? AND grade IN ('AA', 'BA', 'BB', 'CB', 'CC', 'DC', 'DD', 'S', 'P', 'EX')", (test_student_id, prereq_for_course))
+    conn.commit()
+    conn.close()
+
+    success, message = db.add_enrollment_with_prereq_check(test_student_id, course_to_test, "2025-Fall")
+    print(f"Result: {message}")
+
+    print(f"\nNow, let's add the prerequisite {prereq_for_course} with a passing grade...")
+    db.add_enrollment(test_student_id, prereq_for_course, "2024-Spring", "CC")
+    print(f"Enrollment record added for {prereq_for_course}.")
+    
+    print(f"\nAttempting to enroll student {test_student_id} in {course_to_test} again...")
+    success, message = db.add_enrollment_with_prereq_check(test_student_id, course_to_test, "2025-Fall")
+    print(f"Result: {message}")

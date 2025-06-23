@@ -23,9 +23,10 @@ class GradeCalculator:
         'AA': 4.0, 'BA': 3.5, 'BB': 3.0, 'CB': 2.5, 'CC': 2.0,
         'DC': 1.5, 'DD': 1.0, 'FD': 0.0, 'FF': 0.0, 'NA': 0.0,
         'EX': None, 'P': None, 'NP': None, 'W': None, 'I': None,
+        'S': None, 'U': None
     }
-    PASSING_GRADES = {'AA', 'BA', 'BB', 'CB', 'CC', 'DC', 'DD', 'P', 'EX'}
-    NON_GPA_GRADES = {'EX', 'P', 'NP', 'W', 'I'}
+    PASSING_GRADES = {'AA', 'BA', 'BB', 'CB', 'CC', 'DC', 'DD', 'P', 'EX', 'S'}
+    NON_GPA_GRADES = {'EX', 'P', 'NP', 'W', 'I', 'S', 'U'}
 
     def extract_credit_hours(self, metu_credits: Optional[str]) -> float:
         """Extracts credit hours from METU credit format like "4(3-2)"."""
