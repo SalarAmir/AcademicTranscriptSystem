@@ -46,8 +46,21 @@ class GradeCalculator:
         return self.GRADE_SCALE.get(grade.upper())
 
     def is_passing_grade(self, grade: str) -> bool:
-        """Check if a grade is a passing grade"""
-        return grade.upper() in self.PASSING_GRADES
+        """Check if a grade is considered passing"""
+        if not grade or grade == 'NA':
+            return False
+        
+        # Letter grades
+        passing_letter_grades = ['AA', 'BA', 'BB', 'CB', 'CC', 'DC', 'DD']
+        
+        # Pass/fail grades
+        passing_pass_fail_grades = ['S', 'P', 'EX']  # S=Satisfactory, P=Pass, EX=Exempt
+        
+        # Combine all passing grades
+        all_passing_grades = passing_letter_grades + passing_pass_fail_grades
+        
+        return grade in all_passing_grades
+        # This implicitly means 'FF' and 'U' are failing grades
 
     def is_gpa_grade(self, grade: str) -> bool:
         """Check if a grade contributes to GPA calculation"""

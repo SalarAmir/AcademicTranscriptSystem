@@ -301,7 +301,9 @@ class TranscriptFormatter:
         if not transcript_data.semester_summaries:
             return "<p>No semester data found.</p>"
 
-        for semester in sorted(transcript_data.semester_summaries.keys()):
+        # Ensure you're processing semesters in chronological order
+        sorted_semesters = sort_semesters(transcript_data.semester_summaries.keys())
+        for semester in sorted_semesters:
             summary = transcript_data.semester_summaries[semester]
             sections_html += f"""
             <div class="semester-section">
@@ -441,11 +443,12 @@ class TranscriptFormatter:
             # 3. Academic Record Section
             story.append(Paragraph("Academic Record", style_heading))
 
-            sorted_semesters = sorted(transcript_data.semester_summaries.keys()) if transcript_data.semester_summaries else []
+            sorted_semesters = sort_semesters(transcript_data.semester_summaries.keys()) if transcript_data.semester_summaries else []
             
             if not sorted_semesters:
                 story.append(Paragraph("No academic records found for this student.", style_body))
 
+            # Ensure you're processing semesters in chronological order
             for semester in sorted_semesters:
                 summary = transcript_data.semester_summaries.get(semester, {}) # Default to empty dict
                 
@@ -511,3 +514,31 @@ class TranscriptFormatter:
             print(f"An error occurred during PDF generation for student {student_id_for_error}: {e}")
             traceback.print_exc()
             return None
+
+def sort_semesters(semester_list):
+    """
+    Sort semesters in academic year order (Fall then Spring)
+    """
+    def get_sort_key(semester):
+        # Parse the semester string (e.g., "2021-Fall")
+        try:
+            year_str, term = semester.split('-')
+            year = int(year_str)
+            
+            # Use academic year grouping (Fall 2021 and Spring 2022 are in the same academic year)
+            # This ensures Fall comes before Spring when sorted
+            academic_year = year if term == 'Fall' else year-1
+            term_value = 1 if term == 'Fall' else 2
+            
+            return (academic_year, term_value)
+        except (ValueError, IndexError):
+            # Handle invalid format
+            return (0, 0)
+    
+    return sorted(semester_list, key=get_sort_key)
+
+# For testing, add this temporarily
+test_semesters = ["2021-Fall", "2022-Spring", "2022-Fall", "2023-Spring"]
+sorted_result = sort_semesters(test_semesters)
+print(f"Sorted semesters: {sorted_result}")
+# Should print: ['2021-Fall', '2022-Spring', '2022-Fall', '2023-Spring']
